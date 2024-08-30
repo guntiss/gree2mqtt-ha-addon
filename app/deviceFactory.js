@@ -36,6 +36,8 @@ class Controller {
 
     this.debug = this.options.debug
 
+    // console.log("Debug mode:", this.debug)
+
     /**
          * Controller object
          * @type {object}
@@ -90,19 +92,21 @@ class Controller {
      * @param {number} port - Port number
      */
   _setController (message, pack, address, port) {
+    // console.log("_setController debug pack:", pack)
     this.controller.cid = message.cid
     this.controller.uid = message.uid || 0
     this.controller.mac = pack.mac
-    this.controller.name = pack.name
+    this.controller.name = pack.name || pack.mac
     this.controller.subCnt = pack.subCnt || 0
     this.controller.address = address
     this.controller.port = port
     this.controller.bound = false
     this.controller.devices = {}
+    this.controller.firmware = pack.hid || "unknown"
 
-    console.log('[UDP] New Controller registered: %s', this.controller.name)
+    console.log('[UDP] Controller registered: ', JSON.stringify(this.controller))
   }
-
+x
   /**
      * Register new device locally
      * @param {string} mac - Device mac address
@@ -127,7 +131,7 @@ class Controller {
     }
 
     this.controller.devices[mac] = new Device(this, options)
-    console.log('[UDP] New Device registered: %s', name)
+    console.log('[UDP] Device registered: %s', JSON.stringify(options))
   }
 
   /**
@@ -149,7 +153,7 @@ class Controller {
   _confirmBinding (key) {
     this.controller.bound = true
     this.controller.key = key
-    console.log('[UDP] Controller %s is bound!', this.controller.name)
+    console.log('[UDP] Controller bound:', JSON.stringify(this.controller))
   }
 
   /**
@@ -170,10 +174,23 @@ class Controller {
      */
   _requestDeviceStatus (device) {
     const pack = {
-      cols: Object.keys(cmd).map(key => cmd[key].code),
+      cols: (Object.keys(cmd).map(key => cmd[key].code)),
       mac: device.mac,
       t: 'status'
     }
+
+    // Query additional values
+    // pack.cols.push('host')
+    // pack.cols.push('name')
+    // pack.cols.push('OutEnvTem')
+    // pack.cols.push('TemsSenOut')
+    // pack.cols.push('InEvaTem')
+    // pack.cols.push('CompressorFqy')
+    // pack.cols.push('CompressorTem')
+    // pack.cols.push('StHt')
+    // pack.cols.push('HeatCoolType')
+    // pack.cols.push('Buzzer_ON_OFF')
+
     this._sendRequest(pack)
   }
 
@@ -190,6 +207,8 @@ class Controller {
     // Extract encrypted package from message using device key (if available)
     const pack = encryptionService.decrypt(message, (this.controller || {}).key)
     const type = pack.t || ''
+
+    // console.log("_handleResponse", JSON.stringify({pack})) // lots of noise, after each query
 
     // If package type is response to handshake
     if (type === 'dev') {
@@ -260,6 +279,8 @@ class Controller {
     }
     const serializedRequest = Buffer.from(JSON.stringify(request))
     socket.send(serializedRequest, 0, serializedRequest.length, this.controller.port, this.controller.address)
+
+    // console.log("_sendRequest:", JSON.stringify({pack, request}))
   };
 
 };
@@ -321,8 +342,11 @@ class Device {
       }
       if(cmd[name].value)
         state = Object.keys(cmd[name].value).find(k => cmd[name].value[k] === changedProps[key])
-      else
+      else {
         state = changedProps[key]
+        if (key === 'TemSen') state -= 40 // temperature sensor has an offset of +40 to avoid using negative values
+        // console.log(`DEBUG: KEY[${key}] STATE[${state}]`)
+      }
       res[name] = {value: changedProps[key], state}
       this.debug && console.log("[UDP][Debug][Status Prepare] %s %s: %s -> %s %s", this.name, this.mac, name, state, changedProps[key])
     }
@@ -337,13 +361,16 @@ class Device {
      */
   _handleDat (pack) {
     const changed = {}
+    // console.log("_handleDat pack:", pack)
     pack.cols.forEach((col, i) => {
-      if(this.props[col] !== pack.dat[i])
+      if(this.props[col] !== pack.dat[i]) // comment out to publish all values even if not chagned
         changed[col] = pack.dat[i]
       this.props[col] = pack.dat[i]
     })
+
     if(Object.keys(changed).length > 0)
       this.callbacks.onStatus(this, this._prepareCallback(changed))
+    
     return
   }
 
@@ -356,8 +383,15 @@ class Device {
   _handleRes (pack) {
     const changed = {}
     pack.opt.forEach((opt, i) => {
-      changed[opt] = pack.val[i]
-      this.props[opt] = pack.val[i]
+  
+      const current_value = this.props[opt];
+      const received_value = pack.p[i]
+      
+      // update only if changed
+      if (current_value !== received_value) {
+        changed[opt] = received_value
+        this.props[opt] = received_value
+      }
     })
     this.callbacks.onUpdate(this, this._prepareCallback(changed))
     return
@@ -369,11 +403,17 @@ class Device {
      * @param {number[]} values List of values
      */
   _sendCommand (commands = [], values = []) {
+    // console.log("_sendCommand:", _sendCommand)
     const pack = {
       opt: commands,
       p: values,
       t: 'cmd'
     }
+
+    // Silent mode
+    pack.opt.push('Buzzer_ON_OFF')
+    pack.p.push(1)
+
     if(this.isSubDev)
       pack.sub = this.mac
     this.controller._sendRequest(pack)
@@ -541,6 +581,7 @@ class Device {
       [value ? 1 : 0]
     )
   };
+
 };
 
 module.exports.connect = function (options) {

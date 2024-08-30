@@ -58,4 +58,4 @@ typings/
 .env
 
 # Persistent data for docker image with Hass.io addon
-data/
+options.json

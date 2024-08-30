@@ -1,0 +1,10 @@
+version: "3"
+services:
+  gree2mqtt_dev:
+    container_name: gree2mqtt_dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/usr/src/app
+      - ./options.json:/data/options.json

@@ -27,7 +27,7 @@ class HOMEASSISTANT_DISCOVERY{
         this.mqttPubOptions = options.mqttPubOptions || {}
         this.mqttPubInterval = options.mqttPubInterval*1000 || 600*1000
 
-        this.unique_id = 'gree_' + this.device_mac
+        this.unique_id = 'gree_' + this.device_mac // TODO: Would be better to use "name" value from config (by mapping IP to device)
 
         this.DEVMSG = {
             device: {
@@ -38,7 +38,7 @@ class HOMEASSISTANT_DISCOVERY{
         }
 
         this.registered = []
-        this.allowCommands = ['climate', 'power', 'sleep', 'turbo', 'powersave', 'health', 'lights', 'blow', 'quiet', 'quiet_as_switch', 'air']
+        this.allowCommands = ['climate', 'power', 'sleep', 'turbo', 'powersave', 'health', 'lights', 'blow', 'quiet', 'quiet_as_switch', 'air', 'firmware', 'ip', 'tempsensor']
         this.enabledCommands = []
     }
 
@@ -51,18 +51,18 @@ class HOMEASSISTANT_DISCOVERY{
         if(commands)
             for(let cmd of commands){
                 if(default_commands.includes(cmd)){
-                    console.log("[HOMEASSISTANT_DISCOVERY][Notice] %s is an command that is enabled by default, skipped.")
+                    // console.log("[HOMEASSISTANT_DISCOVERY][Notice] %s is an command that is enabled by default, skipped.")
                     continue
                 }
                 if(!this.allowCommands.includes(cmd)){
-                    console.log("[HOMEASSISTANT_DISCOVERY][Warning] %s is a disallowed command, skipped.")
+                    console.log("[HOMEASSISTANT_DISCOVERY][Warning] %s is unknown command, skipped.")
                     continue
                 }
                 eval('this._register_' + cmd + '()')
                 this.enabledCommands.push(cmd)
             }
 
-        console.log("[HOMEASSISTANT_DISCOVERY] %s registered.", this.enabledCommands.join(','))
+        console.log("[HOMEASSISTANT_DISCOVERY] Registered commands: %s", this.enabledCommands.join(','))
     }
 
     REGISTER_ALL(){
@@ -95,18 +95,21 @@ class HOMEASSISTANT_DISCOVERY{
         const component = 'climate'
         const DISCOVERY_MSG = {
             'name': 'Climate',
-
+            'icon': 'mdi:air-conditioner',
             'temperature_state_topic':    this.mqttDeviceTopic + "/temperature/get",
             'temperature_command_topic':  this.mqttDeviceTopic + "/temperature/set",
+            'current_temperature_topic':  this.mqttDeviceTopic + "/tempsensor/get",
             'mode_state_topic':           this.mqttDeviceTopic + "/mode/get",
             'mode_command_topic':         this.mqttDeviceTopic + "/mode/set",
             'fan_mode_state_topic':       this.mqttDeviceTopic + "/fanspeed/get",
             'fan_mode_command_topic':     this.mqttDeviceTopic + "/fanspeed/set",
             'swing_mode_state_topic':     this.mqttDeviceTopic + "/swingvert/get",
             'swing_mode_command_topic':   this.mqttDeviceTopic + "/swingvert/set",
+            'power_command_topic':        this.mqttDeviceTopic + "/power/set",
 
             'modes': ['off', ...Object.keys(commands.mode.value)],
-            'fan_modes': Object.keys(commands.fanSpeed.value),
+            // 'fan_modes': Object.keys(commands.fanSpeed.value),
+            'fan_modes': ['low', 'auto', 'high'],
             'swing_modes': Object.keys(commands.swingVert.value),
         }
         const DISCOVERY_Optional = {}
@@ -167,13 +170,33 @@ class HOMEASSISTANT_DISCOVERY{
             'options': Object.keys(commands.air.value),
         }, 'sync')
     }
+    _register_firmware() {
+        return this.__register_sensor('firmware', 'Firmware')
+    }
+    _register_ip() {
+        return this.__register_sensor('ip', 'IP Address')
+    }
+
+    _register_tempsensor() {
+        // return this.__register_sensor('tempsensor', 'Temperature sensor')
+        const name = 'Temperature sensor'
+        const entity = 'tempsensor'
+
+        const component = 'sensor'
+        const DISCOVERY_MSG = {
+            'name': name,
+            'icon': 'mdi:thermometer',
+            'state_topic': this.mqttDeviceTopic + '/' + entity + '/get',
+            'unit_of_measurement': '°C'
+        }
+        this._publish(DISCOVERY_MSG, component, entity)
+    }
 
     //Common Switch Register
     __register_switch(entity, name, icon){
         const component = 'switch'
         const DISCOVERY_MSG = {
             'name': name,
-
             'state_topic': this.mqttDeviceTopic + '/' + entity + '/get',
             'command_topic': this.mqttDeviceTopic + '/' + entity + '/set',
             'payload_off': 0,
@@ -194,6 +217,16 @@ class HOMEASSISTANT_DISCOVERY{
         }
         if(icon) DISCOVERY_MSG['icon'] = 'mdi:' + icon
         this._publish(Object.assign({}, DISCOVERY_MSG, options), component, entity)
+    }
+
+    //Common Sensor Register
+    __register_sensor(entity, name) {
+        const component = 'sensor'
+        const DISCOVERY_MSG = {
+            'name': name,
+            'state_topic': this.mqttDeviceTopic + '/' + entity + '/get',
+        }
+        this._publish(DISCOVERY_MSG, component, entity)
     }
 
     __generate_template(values ,type = 'command'){
